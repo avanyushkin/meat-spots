@@ -30,6 +30,7 @@ interface TelegramWebApp {
   offEvent(event: "themeChanged", cb: () => void): void;
   CloudStorage: TelegramCloudStorage;
   BackButton: TelegramBackButton;
+  isVersionAtLeast?(version: string): boolean;
 }
 
 declare global {
@@ -71,12 +72,30 @@ export function useBackButton(onBack: () => void): () => void {
   };
 }
 
-// В самом Telegram-клиенте используем CloudStorage (синхронизируется между
-// устройствами одного аккаунта), вне Telegram (обычный браузер, для
-// разработки/тестирования) — откатываемся на localStorage.
+// CloudStorage появился в Bot API 6.9 — в более старых клиентах (например,
+// версия 6.0) объект CloudStorage присутствует как заглушка, но любой вызов
+// его методов кидает необработанный "WebAppMethodUnsupported" и колбэк так и
+// не срабатывает. Поэтому перед использованием проверяем версию явно, а не
+// просто наличие объекта.
+function cloudStorageAvailable(): boolean {
+  const webApp = window.Telegram?.WebApp;
+  if (!webApp?.CloudStorage) return false;
+  if (typeof webApp.isVersionAtLeast === "function") {
+    try {
+      return webApp.isVersionAtLeast("6.9");
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+// В самом Telegram-клиенте (когда CloudStorage поддерживается) используем его
+// — синхронизируется между устройствами одного аккаунта. Иначе (старый
+// клиент или обычный браузер при разработке) — откатываемся на localStorage.
 export function storageGet(key: string): Promise<string | null> {
-  const cloud = window.Telegram?.WebApp.CloudStorage;
-  if (!cloud) return Promise.resolve(localStorage.getItem(key));
+  if (!cloudStorageAvailable()) return Promise.resolve(localStorage.getItem(key));
+  const cloud = window.Telegram!.WebApp.CloudStorage;
   return new Promise((resolve) => {
     cloud.getItem(key, (error, value) => {
       if (error || !value) resolve(null);
@@ -86,22 +105,22 @@ export function storageGet(key: string): Promise<string | null> {
 }
 
 export function storageSet(key: string, value: string): Promise<void> {
-  const cloud = window.Telegram?.WebApp.CloudStorage;
-  if (!cloud) {
+  if (!cloudStorageAvailable()) {
     localStorage.setItem(key, value);
     return Promise.resolve();
   }
+  const cloud = window.Telegram!.WebApp.CloudStorage;
   return new Promise((resolve) => {
     cloud.setItem(key, value, () => resolve());
   });
 }
 
 export function storageRemove(key: string): Promise<void> {
-  const cloud = window.Telegram?.WebApp.CloudStorage;
-  if (!cloud) {
+  if (!cloudStorageAvailable()) {
     localStorage.removeItem(key);
     return Promise.resolve();
   }
+  const cloud = window.Telegram!.WebApp.CloudStorage;
   return new Promise((resolve) => {
     cloud.removeItem(key, () => resolve());
   });
